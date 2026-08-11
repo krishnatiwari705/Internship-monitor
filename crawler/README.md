@@ -11,6 +11,11 @@ This is the ingestion and matching layer for the Internship Monitor.
 1. **Greenhouse Job Board API** — public GET endpoints; configured with board tokens in `config.json` or `GREENHOUSE_BOARDS`.
 2. **Lever public postings** — configured with site names in `config.json` or `LEVER_SITES`.
 3. **RSS/search discovery** — broad discovery for opportunities without a configured ATS adapter.
+4. **LinkedIn hiring-post discovery** — search-indexed public LinkedIn post/job results are discovered through the RSS/search layer. Queries target phrases such as `hiring`, `we are hiring`, `looking for interns`, `internship opportunity`, and relevant AI/backend/software terms.
+
+### LinkedIn safety boundary
+
+The crawler does **not** log into LinkedIn, scrape LinkedIn pages, automate a LinkedIn account, collect member profiles, or bypass LinkedIn controls. LinkedIn states that unauthorized crawlers, bots, and automated scraping are prohibited. Therefore this project only uses search-indexed/public discovery results and stores the resulting public application/post URL when available. For reliable structured job data, it prefers the employer's ATS or official career page.
 
 The Greenhouse adapter stores stable job IDs, published/updated timestamps, location, description and the direct application URL. The public Greenhouse GET endpoints do not require authentication. The Lever adapter consumes published postings and hosted/application URLs.
 
@@ -21,6 +26,7 @@ The Greenhouse adapter stores stable job IDs, published/updated timestamps, loca
 - `new_jobs.json` contains only newly discovered jobs for the current run.
 - Jobs with a changed source `updated` timestamp are marked `updated`.
 - Existing `first_seen` timestamps are preserved.
+- LinkedIn/search-discovered items are treated as leads until the employer's original posting or ATS page can be verified.
 
 ## Matching
 
