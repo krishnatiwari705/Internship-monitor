@@ -1,0 +1,6 @@
+{
+  "locations": ["Delhi", "Noida", "Gurgaon", "Gurugram", "Greater Noida", "Faridabad", "Ghaziabad", "Remote India"],
+  "entry_terms": ["intern", "internship", "trainee", "graduate", "fresher", "entry level", "2027"],
+  "preferred_roles": ["ai engineer", "ai/ml", "generative ai", "backend", "software engineer", "sde", "full stack", "python developer", "java developer", "node.js", "rag", "machine learning"],
+  "skills": ["python", "java", "c++", "fastapi", "node.js", "express", "react", "rest api", "mongodb", "docker", "git", "rag", "langchain", "langgraph", "gemini", "llm", "generative ai", "machine learning"]
+}
