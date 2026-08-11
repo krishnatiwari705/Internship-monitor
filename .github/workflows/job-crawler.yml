@@ -2,6 +2,9 @@ name: Internship Job Crawler
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
   schedule:
     # GitHub Actions uses UTC. Run hourly; scheduled jobs can be delayed by GitHub.
     - cron: "0 * * * *"
