@@ -10,6 +10,12 @@
     "site:boards.greenhouse.io internship Delhi Noida Gurgaon",
     "site:jobs.lever.co internship Delhi Noida Gurgaon"
   ],
+  "linkedin_discovery_queries": [
+    "site:linkedin.com/posts (hiring OR "we are hiring" OR "looking for interns") (AI OR backend OR software OR SDE OR full stack) (Delhi OR Noida OR Gurgaon OR Gurugram)",
+    "site:linkedin.com/posts (hiring OR "we're hiring") (intern OR internship) (Python OR Java OR React OR Node.js OR GenAI)",
+    "site:linkedin.com/posts ("internship opportunity" OR "interns wanted" OR "hiring interns") India AI software",
+    "site:linkedin.com/jobs/view (AI OR backend OR software OR SDE OR full stack) intern India"
+  ],
   "sources": {
     "greenhouse": [],
     "lever": [],
@@ -18,7 +24,10 @@
       {"name":"Google News NCR backend internships","query":"(backend OR software engineer OR SDE OR Python OR Java OR Node.js) internship (Delhi OR Noida OR Gurgaon OR Gurugram)"},
       {"name":"Google News NCR full stack internships","query":"(full stack OR fullstack OR React OR Node.js) internship (Delhi OR Noida OR Gurgaon OR Gurugram)"},
       {"name":"Google News remote India AI internships","query":"(AI OR GenAI OR machine learning OR RAG OR LLM) internship remote India"},
-      {"name":"Google News remote India software internships","query":"(backend OR software engineer OR full stack OR SDE) internship remote India"}
+      {"name":"Google News remote India software internships","query":"(backend OR software engineer OR full stack OR SDE) internship remote India"},
+      {"name":"LinkedIn hiring posts — NCR","query":"site:linkedin.com/posts (hiring OR "we are hiring" OR "looking for interns" OR "internship opportunity") (AI OR backend OR software OR SDE OR full stack) (Delhi OR Noida OR Gurgaon OR Gurugram)"},
+      {"name":"LinkedIn hiring posts — India","query":"site:linkedin.com/posts (hiring OR "we're hiring" OR "interns wanted" OR "internship opportunity") (AI OR backend OR software OR Python OR Java OR React OR Node.js) India"},
+      {"name":"LinkedIn internship posts — GenAI","query":"site:linkedin.com/posts (intern OR internship) (GenAI OR LLM OR RAG OR AI/ML) India"}
     ]
   }
 }
