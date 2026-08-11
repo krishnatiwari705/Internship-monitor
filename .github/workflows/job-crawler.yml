@@ -1,0 +1,39 @@
+name: Internship Job Crawler
+
+on:
+  workflow_dispatch:
+  schedule:
+    # GitHub Actions uses UTC. These are approximately 08:00 and 20:00 IST.
+    - cron: "30 2 * * *"
+    - cron: "30 14 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: crawler/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r crawler/requirements.txt
+
+      - name: Run crawler
+        run: python crawler/main.py
+
+      - name: Commit crawler results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crawler/data/jobs.json crawler/data/seen.json
+          git diff --cached --quiet || git commit -m "chore: update internship listings"
+          git push
