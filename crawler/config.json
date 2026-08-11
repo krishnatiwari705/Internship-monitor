@@ -1,0 +1,15 @@
+{
+  "locations": ["Delhi", "Noida", "Gurgaon", "Gurugram", "Greater Noida", "Faridabad", "Ghaziabad", "Remote India"],
+  "roles": ["AI Engineer Intern", "AI/ML Intern", "Generative AI Intern", "Backend Developer Intern", "Software Engineer Intern", "SDE Intern", "Full Stack Developer Intern", "Python Developer Intern", "Java Developer Intern", "Node.js Intern", "RAG Intern", "Machine Learning Intern"],
+  "entry_terms": ["intern", "internship", "trainee", "graduate", "fresher", "entry level", "2027"],
+  "sources": {
+    "greenhouse": [],
+    "lever": [],
+    "rss": [
+      {"name":"Google News NCR AI internships","query":"(AI OR GenAI OR machine learning) internship (Delhi OR Noida OR Gurgaon OR Gurugram)"},
+      {"name":"Google News NCR backend internships","query":"(backend OR software engineer OR SDE) internship (Delhi OR Noida OR Gurgaon OR Gurugram)"},
+      {"name":"Google News NCR full stack internships","query":"(full stack OR fullstack OR React OR Node.js) internship (Delhi OR Noida OR Gurgaon OR Gurugram)"},
+      {"name":"Google News remote India internships","query":"(AI OR backend OR software engineer) internship remote India"}
+    ]
+  }
+}
