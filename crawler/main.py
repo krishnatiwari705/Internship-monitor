@@ -14,8 +14,10 @@ from bs4 import BeautifulSoup
 
 from discovery import discover_ats_targets
 from scoring import score_job
+from sources.career_pages import discover as discover_career_leads
 from sources.greenhouse import fetch_greenhouse as greenhouse_adapter
 from sources.lever import fetch_lever as lever_adapter
+from sources.linkedin_public import discover as discover_linkedin_leads
 
 ROOT = Path(__file__).resolve().parent
 CONFIG = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
@@ -25,12 +27,6 @@ DATA_DIR.mkdir(exist_ok=True)
 OUTPUT = DATA_DIR / "jobs.json"
 SEEN = DATA_DIR / "seen.json"
 NEW_OUTPUT = DATA_DIR / "new_jobs.json"
-
-HEADERS = {
-    "User-Agent": "InternshipMonitor/3.1 (+https://github.com/krishnatiwari705/Internship-monitor)",
-    "Accept": "application/json, application/rss+xml, application/xml, text/html;q=0.9, */*;q=0.8",
-}
-TIMEOUT = 25
 
 ROLE_TERMS = tuple(x.lower() for x in CONFIG["roles"])
 ENTRY_TERMS = tuple(x.lower() for x in CONFIG["entry_terms"])
@@ -65,16 +61,29 @@ def relevant(title: str, description: str, location: str) -> bool:
     )
 
 
-def normalize(company: str, source: str, title: str, description: str, location: str,
-              url: str, external_id: str, published: str | None = None,
-              updated: str | None = None, source_type: str = "unknown") -> dict | None:
+def normalize(
+    company: str,
+    source: str,
+    title: str,
+    description: str,
+    location: str,
+    url: str,
+    external_id: str,
+    published: str | None = None,
+    updated: str | None = None,
+    source_type: str = "unknown",
+    verification: str = "source",
+) -> dict | None:
     title = clean(title)
     description = clean(description)
     location = clean(location) or "India"
     if not title or not url or not relevant(title, description, location):
         return None
 
-    match = score_job({"title": title, "description": description, "location": location}, PROFILE)
+    match = score_job(
+        {"title": title, "description": description, "location": location},
+        PROFILE,
+    )
     now = datetime.now(timezone.utc).isoformat()
 
     return {
@@ -84,6 +93,7 @@ def normalize(company: str, source: str, title: str, description: str, location:
         "location": location,
         "source": source,
         "source_type": source_type,
+        "verification": verification,
         "url": url,
         "published": parse_dt(published),
         "updated": parse_dt(updated),
@@ -121,6 +131,7 @@ def fetch_rss() -> list[dict]:
                     published=entry.get("published") or entry.get("updated"),
                     updated=entry.get("updated") or entry.get("published"),
                     source_type="rss",
+                    verification="public_search_result",
                 )
                 if job:
                     results.append(job)
@@ -133,7 +144,6 @@ def fetch_structured_ats() -> tuple[list[dict], dict]:
     results = []
     discovered = {"greenhouse": set(), "lever": set()}
 
-    # Discover public ATS identifiers from fresh search results, then query the ATS directly.
     if os.getenv("DISABLE_ATS_DISCOVERY", "0") != "1":
         try:
             discovered = discover_ats_targets(CONFIG.get("ats_discovery_queries", []))
@@ -163,6 +173,7 @@ def fetch_structured_ats() -> tuple[list[dict], dict]:
                     external_id=item["source_id"],
                     updated=item.get("updated_at"),
                     source_type="greenhouse",
+                    verification="ats_api",
                 )
                 if job:
                     results.append(job)
@@ -192,6 +203,7 @@ def fetch_structured_ats() -> tuple[list[dict], dict]:
                     external_id=item["source_id"],
                     updated=item.get("updated_at"),
                     source_type="lever",
+                    verification="ats_api",
                 )
                 if job:
                     results.append(job)
@@ -202,6 +214,72 @@ def fetch_structured_ats() -> tuple[list[dict], dict]:
         "greenhouse_discovered": sorted(discovered["greenhouse"]),
         "lever_discovered": sorted(discovered["lever"]),
     }
+
+
+def fetch_career_and_startup_leads() -> list[dict]:
+    results = []
+    try:
+        leads = discover_career_leads()
+    except Exception as exc:  # noqa: BLE001
+        print(f"Career/startup discovery failed: {exc}")
+        leads = []
+
+    for lead in leads:
+        title = lead.get("title", "")
+        description = lead.get("description", "")
+        text = f"{title} {description}".lower()
+        location = next((x for x in CONFIG["locations"] if x.lower() in text), "India")
+        job = normalize(
+            company="Unknown / verify on posting",
+            source=lead.get("source", "Startup / career public search"),
+            title=title,
+            description=description,
+            location=location,
+            url=lead.get("url", ""),
+            external_id=lead.get("url", ""),
+            published=lead.get("published"),
+            source_type=lead.get("source_type", "career_page"),
+            verification=lead.get("verification", "public_search_result"),
+        )
+        if job:
+            job["needs_verification"] = True
+            results.append(job)
+
+    return results
+
+
+def fetch_linkedin_leads() -> list[dict]:
+    """Add public-search LinkedIn recruiter/hiring-post leads."""
+    results = []
+    try:
+        leads = discover_linkedin_leads()
+    except Exception as exc:  # noqa: BLE001
+        print(f"LinkedIn discovery failed: {exc}")
+        return results
+
+    for lead in leads:
+        title = lead.get("title", "")
+        description = lead.get("description", "")
+        text = f"{title} {description}".lower()
+        location = next((x for x in CONFIG["locations"] if x.lower() in text), "India")
+        job = normalize(
+            company="Unknown / verify recruiter post",
+            source="LinkedIn public hiring post",
+            title=title,
+            description=description,
+            location=location,
+            url=lead.get("url", ""),
+            external_id=lead.get("url", ""),
+            published=None,
+            source_type="linkedin_post",
+            verification="public_search_result",
+        )
+        if job:
+            job["needs_verification"] = True
+            job["lead_type"] = "recruiter_or_hiring_post"
+            results.append(job)
+
+    return results
 
 
 def load_json(path: Path, default):
@@ -240,7 +318,7 @@ def merge_jobs(existing: list[dict], incoming: list[dict]) -> tuple[list[dict], 
 def main() -> None:
     existing = load_json(OUTPUT, {"generated": None, "jobs": []})
     structured, discovery_meta = fetch_structured_ats()
-    incoming = structured + fetch_rss()
+    incoming = structured + fetch_rss() + fetch_career_and_startup_leads() + fetch_linkedin_leads()
     jobs, fresh = merge_jobs(existing.get("jobs", []), incoming)
 
     jobs.sort(
@@ -259,6 +337,9 @@ def main() -> None:
             "greenhouse": sum(x.get("source_type") == "greenhouse" for x in incoming),
             "lever": sum(x.get("source_type") == "lever" for x in incoming),
             "rss": sum(x.get("source_type") == "rss" for x in incoming),
+            "startup_board": sum(x.get("source_type") == "startup_board" for x in incoming),
+            "career_page": sum(x.get("source_type") == "career_page" for x in incoming),
+            "linkedin_post": sum(x.get("source_type") == "linkedin_post" for x in incoming),
         },
         "discovery": discovery_meta,
         "jobs": jobs,
