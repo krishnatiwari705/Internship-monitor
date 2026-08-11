@@ -12,6 +12,7 @@ import feedparser
 import requests
 from bs4 import BeautifulSoup
 
+from discovery import discover_ats_targets
 from scoring import score_job
 from sources.greenhouse import fetch_greenhouse as greenhouse_adapter
 from sources.lever import fetch_lever as lever_adapter
@@ -26,7 +27,7 @@ SEEN = DATA_DIR / "seen.json"
 NEW_OUTPUT = DATA_DIR / "new_jobs.json"
 
 HEADERS = {
-    "User-Agent": "InternshipMonitor/3.0 (+https://github.com/krishnatiwari705/Internship-monitor)",
+    "User-Agent": "InternshipMonitor/3.1 (+https://github.com/krishnatiwari705/Internship-monitor)",
     "Accept": "application/json, application/rss+xml, application/xml, text/html;q=0.9, */*;q=0.8",
 }
 TIMEOUT = 25
@@ -128,16 +129,28 @@ def fetch_rss() -> list[dict]:
     return results
 
 
-def fetch_structured_ats() -> list[dict]:
+def fetch_structured_ats() -> tuple[list[dict], dict]:
     results = []
+    discovered = {"greenhouse": set(), "lever": set()}
 
-    greenhouse = CONFIG["sources"].get("greenhouse", [])
+    # Discover public ATS identifiers from fresh search results, then query the ATS directly.
+    if os.getenv("DISABLE_ATS_DISCOVERY", "0") != "1":
+        try:
+            discovered = discover_ats_targets(CONFIG.get("ats_discovery_queries", []))
+        except Exception as exc:  # noqa: BLE001
+            print(f"ATS discovery failed: {exc}")
+
+    greenhouse = list(CONFIG["sources"].get("greenhouse", []))
     greenhouse += [x.strip() for x in os.getenv("GREENHOUSE_BOARDS", "").split(",") if x.strip()]
+    greenhouse += sorted(discovered["greenhouse"])
+
+    seen_greenhouse = set()
     for board in greenhouse:
         token = board.get("token") if isinstance(board, dict) else board
         company = board.get("company", token) if isinstance(board, dict) else token
-        if not token:
+        if not token or token in seen_greenhouse:
             continue
+        seen_greenhouse.add(token)
         try:
             for item in greenhouse_adapter(token):
                 job = normalize(
@@ -156,13 +169,17 @@ def fetch_structured_ats() -> list[dict]:
         except requests.RequestException as exc:
             print(f"Greenhouse source failed for {company}: {exc}")
 
-    lever = CONFIG["sources"].get("lever", [])
+    lever = list(CONFIG["sources"].get("lever", []))
     lever += [x.strip() for x in os.getenv("LEVER_SITES", "").split(",") if x.strip()]
+    lever += sorted(discovered["lever"])
+
+    seen_lever = set()
     for site_cfg in lever:
         site = site_cfg.get("site") if isinstance(site_cfg, dict) else site_cfg
         company = site_cfg.get("company", site) if isinstance(site_cfg, dict) else site
-        if not site:
+        if not site or site in seen_lever:
             continue
+        seen_lever.add(site)
         try:
             for item in lever_adapter(site):
                 job = normalize(
@@ -181,7 +198,10 @@ def fetch_structured_ats() -> list[dict]:
         except requests.RequestException as exc:
             print(f"Lever source failed for {company}: {exc}")
 
-    return results
+    return results, {
+        "greenhouse_discovered": sorted(discovered["greenhouse"]),
+        "lever_discovered": sorted(discovered["lever"]),
+    }
 
 
 def load_json(path: Path, default):
@@ -219,7 +239,8 @@ def merge_jobs(existing: list[dict], incoming: list[dict]) -> tuple[list[dict], 
 
 def main() -> None:
     existing = load_json(OUTPUT, {"generated": None, "jobs": []})
-    incoming = fetch_structured_ats() + fetch_rss()
+    structured, discovery_meta = fetch_structured_ats()
+    incoming = structured + fetch_rss()
     jobs, fresh = merge_jobs(existing.get("jobs", []), incoming)
 
     jobs.sort(
@@ -239,6 +260,7 @@ def main() -> None:
             "lever": sum(x.get("source_type") == "lever" for x in incoming),
             "rss": sum(x.get("source_type") == "rss" for x in incoming),
         },
+        "discovery": discovery_meta,
         "jobs": jobs,
     }
     OUTPUT.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -248,6 +270,8 @@ def main() -> None:
     print(f"Fetched relevant jobs: {len(incoming)}")
     print(f"New jobs: {len(fresh)}")
     print(f"Stored jobs: {len(jobs)}")
+    print(f"Discovered Greenhouse boards: {len(discovery_meta['greenhouse_discovered'])}")
+    print(f"Discovered Lever sites: {len(discovery_meta['lever_discovered'])}")
 
 
 if __name__ == "__main__":
