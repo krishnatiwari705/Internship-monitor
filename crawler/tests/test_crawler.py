@@ -23,12 +23,18 @@ def test_reject_unrelated_role():
     )
 
 
-def test_score_prefers_profile_skills():
-    score, matched, missing = module.score(
-        "Backend AI Engineer Intern",
-        "Python FastAPI REST APIs RAG LangChain MongoDB Docker Git",
-        "Gurgaon, Haryana",
+def test_normalize_scores_profile_skills():
+    job = module.normalize(
+        company="Example",
+        source="test",
+        title="Backend AI Engineer Intern",
+        description="Python FastAPI REST APIs RAG LangChain MongoDB Docker Git",
+        location="Gurgaon, Haryana",
+        url="https://example.com/jobs/1",
+        external_id="1",
+        source_type="test",
     )
-    assert score >= 80
-    assert "python" in matched
-    assert "FastAPI" not in missing
+    assert job is not None
+    assert job["match_score"] >= 80
+    assert "python" in job["matched_skills"]
+    assert "FastAPI" not in job["missing_skills"]
