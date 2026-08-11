@@ -4,6 +4,12 @@
   "entry_terms": ["intern", "internship", "trainee", "graduate", "fresher", "entry level", "2027"],
   "skills": ["python", "java", "c++", "fastapi", "node.js", "express", "react", "rest api", "mongodb", "docker", "git", "rag", "langchain", "langgraph", "gemini", "llm", "generative ai", "machine learning"],
   "priority_skills": ["Python", "REST APIs", "FastAPI", "Node.js", "React", "MongoDB", "Docker", "RAG", "LangChain", "LangGraph", "Gemini"],
+  "ats_discovery_queries": [
+    "site:boards.greenhouse.io (intern OR internship) (AI OR software OR backend) India",
+    "site:jobs.lever.co (intern OR internship) (AI OR software OR backend) India",
+    "site:boards.greenhouse.io internship Delhi Noida Gurgaon",
+    "site:jobs.lever.co internship Delhi Noida Gurgaon"
+  ],
   "sources": {
     "greenhouse": [],
     "lever": [],
