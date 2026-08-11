@@ -31,6 +31,9 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r crawler/requirements.txt
 
+      - name: Run tests
+        run: pytest -q crawler/tests
+
       - name: Run crawler
         run: python crawler/main.py
 
