@@ -6,14 +6,19 @@ import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import quote_plus, urlparse
+from urllib.parse import quote_plus
 
 import feedparser
 import requests
 from bs4 import BeautifulSoup
 
+from scoring import score_job
+from sources.greenhouse import fetch_greenhouse as greenhouse_adapter
+from sources.lever import fetch_lever as lever_adapter
+
 ROOT = Path(__file__).resolve().parent
 CONFIG = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
+PROFILE = json.loads((ROOT / "profile.json").read_text(encoding="utf-8"))
 DATA_DIR = ROOT / "data"
 DATA_DIR.mkdir(exist_ok=True)
 OUTPUT = DATA_DIR / "jobs.json"
@@ -21,7 +26,7 @@ SEEN = DATA_DIR / "seen.json"
 NEW_OUTPUT = DATA_DIR / "new_jobs.json"
 
 HEADERS = {
-    "User-Agent": "InternshipMonitor/2.0 (+https://github.com/krishnatiwari705/Internship-monitor)",
+    "User-Agent": "InternshipMonitor/3.0 (+https://github.com/krishnatiwari705/Internship-monitor)",
     "Accept": "application/json, application/rss+xml, application/xml, text/html;q=0.9, */*;q=0.8",
 }
 TIMEOUT = 25
@@ -29,7 +34,6 @@ TIMEOUT = 25
 ROLE_TERMS = tuple(x.lower() for x in CONFIG["roles"])
 ENTRY_TERMS = tuple(x.lower() for x in CONFIG["entry_terms"])
 LOCATION_TERMS = tuple(x.lower() for x in CONFIG["locations"])
-SKILLS = tuple(x.lower() for x in CONFIG.get("skills", []))
 
 
 def clean(value: str) -> str:
@@ -45,8 +49,7 @@ def parse_dt(value: str | None) -> str | None:
     if not value:
         return None
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        return parsed.astimezone(timezone.utc).isoformat()
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc).isoformat()
     except ValueError:
         return value
 
@@ -54,47 +57,11 @@ def parse_dt(value: str | None) -> str | None:
 def relevant(title: str, description: str, location: str) -> bool:
     text = f"{title} {description}".lower()
     loc = location.lower()
-    has_role = any(term in text for term in ROLE_TERMS)
-    has_entry = any(term in text for term in ENTRY_TERMS)
-    has_location = any(term in loc or term in text for term in LOCATION_TERMS)
-    return has_role and has_entry and has_location
-
-
-def score(title: str, description: str, location: str) -> tuple[int, list[str], list[str]]:
-    text = f"{title} {description}".lower()
-    matched = [skill for skill in SKILLS if skill in text]
-    missing = []
-    for skill in CONFIG.get("priority_skills", []):
-        if skill.lower() not in text:
-            missing.append(skill)
-
-    points = 35
-    if any(x in text for x in ("ai engineer", "generative ai", "genai", "rag", "llm", "machine learning")):
-        points += 20
-    if any(x in text for x in ("backend", "software engineer", "sde", "full stack", "fullstack")):
-        points += 15
-    if any(x in location.lower() for x in ("delhi", "noida", "gurgaon", "gurugram")):
-        points += 10
-    if "2027" in text:
-        points += 10
-    elif any(x in text for x in ("2026", "2025", "2024")):
-        points += 3
-    points += min(10, len(matched))
-    return min(points, 100), matched, missing[:6]
-
-
-def resolve_url(url: str) -> str:
-    """Follow search/feed redirects so the stored URL is useful to the applicant."""
-    if not url or "news.google.com" not in url:
-        return url
-    try:
-        response = requests.get(url, headers=HEADERS, timeout=TIMEOUT, allow_redirects=True)
-        final = response.url
-        if final and "news.google.com" not in final:
-            return final
-    except requests.RequestException:
-        pass
-    return url
+    return (
+        any(term in text for term in ROLE_TERMS)
+        and any(term in text for term in ENTRY_TERMS)
+        and any(term in loc or term in text for term in LOCATION_TERMS)
+    )
 
 
 def normalize(company: str, source: str, title: str, description: str, location: str,
@@ -106,24 +73,23 @@ def normalize(company: str, source: str, title: str, description: str, location:
     if not title or not url or not relevant(title, description, location):
         return None
 
-    final_url = resolve_url(url)
-    match, matched, missing = score(title, description, location)
+    match = score_job({"title": title, "description": description, "location": location}, PROFILE)
     now = datetime.now(timezone.utc).isoformat()
 
     return {
-        "id": stable_id(source, external_id, final_url, title),
+        "id": stable_id(source, external_id, url, title),
         "title": title,
         "company": clean(company) or "Unknown company",
         "location": location,
         "source": source,
         "source_type": source_type,
-        "url": final_url,
+        "url": url,
         "published": parse_dt(published),
         "updated": parse_dt(updated),
-        "description": description[:5000],
-        "match_score": match,
-        "matched_skills": matched,
-        "missing_priority_skills": missing,
+        "description": description[:6000],
+        "match_score": match["match_score"],
+        "matched_skills": match["matched_skills"],
+        "missing_skills": match["missing_skills"],
         "first_seen": now,
         "last_seen": now,
     }
@@ -139,56 +105,49 @@ def fetch_rss() -> list[dict]:
         try:
             feed = feedparser.parse(google_news_url(source_cfg["query"]))
             for entry in feed.entries:
-                source_name = getattr(entry.get("source"), "title", None) or source_cfg["name"]
-                published = entry.get("published") or entry.get("updated")
+                title = entry.get("title", "")
+                description = entry.get("summary", "")
+                text = f"{title} {description}".lower()
+                location = next((x for x in CONFIG["locations"] if x.lower() in text), "India")
                 job = normalize(
-                    company=source_name,
+                    company=getattr(entry.get("source"), "title", None) or source_cfg["name"],
                     source=source_cfg["name"],
-                    title=entry.get("title", ""),
-                    description=entry.get("summary", ""),
-                    location=" ".join(CONFIG["locations"]),
+                    title=title,
+                    description=description,
+                    location=location,
                     url=entry.get("link", ""),
                     external_id=entry.get("id", entry.get("link", "")),
-                    published=published,
-                    updated=published,
+                    published=entry.get("published") or entry.get("updated"),
+                    updated=entry.get("updated") or entry.get("published"),
                     source_type="rss",
                 )
                 if job:
-                    # Infer the actual location from title/description instead of using the full target list.
-                    text = f"{job['title']} {job['description']}".lower()
-                    job["location"] = next((x for x in CONFIG["locations"] if x.lower() in text), "India")
                     results.append(job)
         except Exception as exc:  # noqa: BLE001
             print(f"RSS source failed: {source_cfg['name']}: {exc}")
     return results
 
 
-def fetch_greenhouse() -> list[dict]:
-    """Fetch published Greenhouse boards. Public GET endpoints require no API key."""
+def fetch_structured_ats() -> list[dict]:
     results = []
-    boards = CONFIG["sources"].get("greenhouse", [])
-    env_boards = [x.strip() for x in os.getenv("GREENHOUSE_BOARDS", "").split(",") if x.strip()]
-    for board in boards + env_boards:
+
+    greenhouse = CONFIG["sources"].get("greenhouse", [])
+    greenhouse += [x.strip() for x in os.getenv("GREENHOUSE_BOARDS", "").split(",") if x.strip()]
+    for board in greenhouse:
         token = board.get("token") if isinstance(board, dict) else board
         company = board.get("company", token) if isinstance(board, dict) else token
         if not token:
             continue
-        url = f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true"
         try:
-            response = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
-            response.raise_for_status()
-            payload = response.json()
-            for item in payload.get("jobs", []):
-                location = (item.get("location") or {}).get("name", "")
+            for item in greenhouse_adapter(token):
                 job = normalize(
                     company=company,
                     source="Greenhouse",
-                    title=item.get("title", ""),
-                    description=item.get("content", ""),
-                    location=location,
-                    url=item.get("absolute_url", ""),
-                    external_id=str(item.get("id", "")),
-                    published=item.get("first_published"),
+                    title=item["title"],
+                    description=item["description"],
+                    location=item["location"],
+                    url=item["url"],
+                    external_id=item["source_id"],
                     updated=item.get("updated_at"),
                     source_type="greenhouse",
                 )
@@ -196,48 +155,32 @@ def fetch_greenhouse() -> list[dict]:
                     results.append(job)
         except requests.RequestException as exc:
             print(f"Greenhouse source failed for {company}: {exc}")
-    return results
 
-
-def fetch_lever() -> list[dict]:
-    """Fetch published Lever postings using the public postings endpoint."""
-    results = []
-    boards = CONFIG["sources"].get("lever", [])
-    env_boards = [x.strip() for x in os.getenv("LEVER_SITES", "").split(",") if x.strip()]
-    for board in boards + env_boards:
-        site = board.get("site") if isinstance(board, dict) else board
-        company = board.get("company", site) if isinstance(board, dict) else site
+    lever = CONFIG["sources"].get("lever", [])
+    lever += [x.strip() for x in os.getenv("LEVER_SITES", "").split(",") if x.strip()]
+    for site_cfg in lever:
+        site = site_cfg.get("site") if isinstance(site_cfg, dict) else site_cfg
+        company = site_cfg.get("company", site) if isinstance(site_cfg, dict) else site
         if not site:
             continue
-        url = f"https://api.lever.co/v0/postings/{site}?mode=json"
         try:
-            response = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
-            response.raise_for_status()
-            payload = response.json()
-            for item in payload:
-                categories = item.get("categories") or {}
-                location = categories.get("location", "")
-                description = " ".join([
-                    item.get("descriptionPlain", ""),
-                    item.get("additionalPlain", ""),
-                    json.dumps(item.get("lists", [])),
-                ])
+            for item in lever_adapter(site):
                 job = normalize(
                     company=company,
                     source="Lever",
-                    title=item.get("text", ""),
-                    description=description,
-                    location=location,
-                    url=item.get("hostedUrl") or item.get("applyUrl", ""),
-                    external_id=str(item.get("id", "")),
-                    published=None,
-                    updated=None,
+                    title=item["title"],
+                    description=item["description"],
+                    location=item["location"],
+                    url=item["url"],
+                    external_id=item["source_id"],
+                    updated=item.get("updated_at"),
                     source_type="lever",
                 )
                 if job:
                     results.append(job)
         except requests.RequestException as exc:
             print(f"Lever source failed for {company}: {exc}")
+
     return results
 
 
@@ -252,22 +195,20 @@ def load_json(path: Path, default):
 
 def merge_jobs(existing: list[dict], incoming: list[dict]) -> tuple[list[dict], list[dict]]:
     by_id = {job["id"]: job for job in existing if job.get("id")}
-    fresh = []
     seen_ids = set(load_json(SEEN, []))
+    fresh = []
 
     for job in incoming:
         old = by_id.get(job["id"])
         if old:
             job["first_seen"] = old.get("first_seen", job["first_seen"])
-            # Preserve the original timestamp when a source does not expose updates.
-            job["last_seen"] = datetime.now(timezone.utc).isoformat()
             if job.get("updated") and job.get("updated") != old.get("updated"):
                 job["status"] = "updated"
             else:
                 job["status"] = old.get("status", "seen")
         else:
             job["status"] = "new"
-
+        job["last_seen"] = datetime.now(timezone.utc).isoformat()
         by_id[job["id"]] = job
         if job["id"] not in seen_ids:
             fresh.append(job)
@@ -278,11 +219,16 @@ def merge_jobs(existing: list[dict], incoming: list[dict]) -> tuple[list[dict], 
 
 def main() -> None:
     existing = load_json(OUTPUT, {"generated": None, "jobs": []})
-    incoming = fetch_greenhouse() + fetch_lever() + fetch_rss()
+    incoming = fetch_structured_ats() + fetch_rss()
     jobs, fresh = merge_jobs(existing.get("jobs", []), incoming)
 
-    # Highest-match jobs first, then newest/most recently updated.
-    jobs.sort(key=lambda x: (x.get("match_score", 0), x.get("updated") or x.get("published") or ""), reverse=True)
+    jobs.sort(
+        key=lambda x: (
+            x.get("match_score", 0),
+            x.get("updated") or x.get("published") or "",
+        ),
+        reverse=True,
+    )
 
     now = datetime.now(timezone.utc).isoformat()
     payload = {
